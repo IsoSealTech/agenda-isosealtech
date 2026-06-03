@@ -17,7 +17,7 @@ DB_FILE = "agenda_db.csv"
 # CONFIGURACIÓN DEL CORREO DESDE LOS SECRETOS DE LA NUBE
 CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
 CORREO_RECEPTOR = st.secrets["CORREO_RECEPTOR"]
-CONTRASEÑA_CORREO = st.secrets["CONTRASEÑA_CORREO"] 
+CONTRASEÑA_CORREO = st.secrets["CONTRASEÑA_CORREO"]
 
 # Cargar o inicializar la base de datos de tareas
 if os.path.exists(DB_FILE):
