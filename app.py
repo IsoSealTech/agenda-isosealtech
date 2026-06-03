@@ -13,10 +13,11 @@ st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout=
 # Archivo local para guardar las tareas
 DB_FILE = "agenda_db.csv"
 
-# CONFIGURACIÓN DEL CORREO
-CORREO_EMISOR = "isosealtech@gmail.com"
-CORREO_RECEPTOR = "isosealtech@gmail.com"
-CONTRASEÑA_CORREO = "qfnj khlg mvtz ddch" 
+
+# CONFIGURACIÓN DEL CORREO DESDE LOS SECRETOS DE LA NUBE
+CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
+CORREO_RECEPTOR = st.secrets["CORREO_RECEPTOR"]
+CONTRASEÑA_CORREO = st.secrets["CONTRASEÑA_CORREO"] 
 
 # Cargar o inicializar la base de datos de tareas
 if os.path.exists(DB_FILE):
