@@ -12,7 +12,8 @@ st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout=
 
 # Archivo local para guardar las tareas
 DB_FILE = "agenda_db.csv"
-
+# Forzar la fecha real de Colombia (UTC -5) calculada desde la hora del servidor
+hoy_colombia = (datetime.utcnow() - timedelta(hours=5)).date()
 
 # CONFIGURACIÓN DEL CORREO DESDE LOS SECRETOS DE LA NUBE
 CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
@@ -84,7 +85,7 @@ if audio_value:
 
 with st.form("form_tarea", clear_on_submit=True):
     input_tarea = st.text_input("¿Qué debes hacer?", value=texto_tarea)
-    fecha_entrega = st.date_input("Fecha límite / Recordatorio", value=date.today())
+    fecha_entrega = st.date_input("Fecha límite / Recordatorio", value=hoy_colombia())
     prioridad = st.selectbox("Prioridad / Necesidad", ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"])
     repeticion = st.selectbox("¿Se repite esta tarea?", ["No repetir", "Cada semana", "Cada mes"])
     
@@ -108,7 +109,7 @@ with st.form("form_tarea", clear_on_submit=True):
 # 2. Recordatorios y Alertas
 st.subheader("👀 Alertas y Prioridades")
 
-hoy = date.today()
+hoy = hoy_colombia()
 if not df_tareas.empty:
     tareas_pendientes = df_tareas[df_tareas["Estado"] == "Pendiente"]
 else:
