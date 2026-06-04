@@ -85,7 +85,7 @@ if audio_value:
 
 with st.form("form_tarea", clear_on_submit=True):
     input_tarea = st.text_input("¿Qué debes hacer?", value=texto_tarea)
-    fecha_entrega = st.date_input("Fecha límite / Recordatorio", value=hoy_colombia())
+    fecha_entrega = st.date_input("Fecha límite / Recordatorio", value=hoy_colombia)
     prioridad = st.selectbox("Prioridad / Necesidad", ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"])
     repeticion = st.selectbox("¿Se repite esta tarea?", ["No repetir", "Cada semana", "Cada mes"])
     
@@ -109,7 +109,7 @@ with st.form("form_tarea", clear_on_submit=True):
 # 2. Recordatorios y Alertas
 st.subheader("👀 Alertas y Prioridades")
 
-hoy = hoy_colombia()
+hoy = hoy_colombia
 if not df_tareas.empty:
     tareas_pendientes = df_tareas[df_tareas["Estado"] == "Pendiente"]
 else:
@@ -181,7 +181,7 @@ if not df_tareas.empty:
                 st.caption(f"Repite: {row['Repeticion']}")
                 
         with col4:
-            # 3. NUEVO: Selector de Prioridad Dinámica
+            # 3. Selector de Prioridad Dinámica
             if row["Estado"] == "Pendiente":
                 opciones_prio = ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"]
                 idx_prio_actual = opciones_prio.index(row["Prioridad"]) if row["Prioridad"] in opciones_prio else 1
