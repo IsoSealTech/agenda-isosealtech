@@ -6,6 +6,7 @@ import smtplib
 from email.mime.text import MIMEText
 from speech_recognition import Recognizer, AudioFile
 import requests
+import json
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout="centered")
@@ -18,32 +19,29 @@ CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
 CORREO_RECEPTOR = st.secrets["CORREO_RECEPTOR"]
 CONTRASEÑA_CORREO = st.secrets["CONTRASEÑA_CORREO"]
 
-# Obtener y procesar la URL de Google Sheets desde Secrets
-GSHEETS_URL = None
-CSV_EXPORT_URL = None
+# Obtener la URL del puente de Google Sheets desde Secrets
+API_URL = None
 try:
-    url_base = st.secrets["connections"]["gsheets"]["spreadsheet"]
-    sheet_id = url_base.split("/d/")[1].split("/")[0]
-    # URL para leer datos
-    CSV_EXPORT_URL = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
-    # URL para escribir datos (usando Google Apps Script o almacenamiento local sincronizado)
-    GSHEETS_URL = url_base
+    API_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 except Exception:
-    st.error("Por favor, asegúrate de tener configurado el enlace de tu Google Sheets en los Secrets de Streamlit.")
+    st.error("Por favor, configura la URL de la aplicación web en los Secrets.")
 
-# Cargar datos desde Google Sheets usando Pandas
+# Cargar datos desde Google Sheets a través del puente
 def cargar_datos():
-    if CSV_EXPORT_URL:
+    if API_URL:
         try:
-            df = pd.read_csv(CSV_EXPORT_URL)
-            df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
-            return df
+            response = requests.get(API_URL, timeout=10)
+            if response.status_code == 200:
+                datos_json = response.json()
+                if datos_json:
+                    df = pd.DataFrame(datos_json)
+                    df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
+                    return df
         except Exception:
-            # Si el archivo está vacío o da error, crea la estructura limpia
-            return pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
+            pass
     return pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
 
-# Inicializar o cargar tareas en el estado de la sesión para persistencia inmediata
+# Inicializar datos en la sesión
 if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
@@ -53,11 +51,19 @@ if "Repeticion" not in df_tareas.columns:
     df_tareas["Repeticion"] = "No repetir"
 
 def guardar_datos():
-    # Guarda en el estado de la sesión para actualización visual instantánea
     st.session_state.df_tareas = df_tareas
-    # Guarda un respaldo local rápido en el servidor de Streamlit
-    df_tareas.to_csv("agenda_db.csv", index=False)
-    st.toast("💾 ¡Cambios guardados en la agenda!")
+    if API_URL:
+        try:
+            # Formatear las fechas como texto para que viajen limpias a Google
+            df_copia = df_tareas.copy()
+            df_copia["Fecha_Entrega"] = df_copia["Fecha de Entrega"].astype(str)
+            datos_enviar = df_copia[["ID", "Tarea", "Fecha_Entrega", "Prioridad", "Estado", "Repeticion"]].to_dict(orient="records")
+            
+            # Enviar los datos en segundo plano a Google Sheets
+            requests.post(API_URL, data=json.dumps(datos_enviar), headers={"Content-Type": "application/json"}, timeout=10)
+            st.toast("💾 ¡Agenda sincronizada con Google Sheets!")
+        except Exception as e:
+            st.toast("⚠️ Guardado localmente. Error de sincronización.")
 
 def calcular_siguiente_fecha(fecha_actual, tipo_repeticion):
     if tipo_repeticion == "Cada semana":
