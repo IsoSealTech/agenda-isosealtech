@@ -1,3 +1,5 @@
 streamlit
 pandas
 SpeechRecognition
+
+st-gsheets-connection
