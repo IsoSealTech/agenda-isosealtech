@@ -5,7 +5,6 @@ import random
 import smtplib
 from email.mime.text import MIMEText
 from speech_recognition import Recognizer, AudioFile
-from streamlit_gsheets import GSheetsConnection
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout="centered")
@@ -18,25 +17,39 @@ CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
 CORREO_RECEPTOR = st.secrets["CORREO_RECEPTOR"]
 CONTRASEÑA_CORREO = st.secrets["CONTRASEÑA_CORREO"]
 
-# Conexión directa a Google Sheets
-conn = st.connection("gsheets", type="sheets")
-
-# Cargar datos desde Google Sheets
+# URL base de tu Google Sheets tomada desde tus Secrets de Streamlit
 try:
-    df_tareas = conn.read(ttl="0d") # ttl="0d" obliga a traer los datos más recientes sin usar caché
-    if df_tareas.empty:
-        df_tareas = pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
-    else:
-        df_tareas["Fecha de Entrega"] = pd.to_datetime(df_tareas["Fecha de Entrega"]).dt.date
+    url_base = st.secrets["connections"]["gsheets"]["spreadsheet"]
+    # Truco para convertir el enlace normal en un enlace de descarga de datos directo
+    sheet_id = url_base.split("/d/")[1].split("/")[0]
+    GSHEETS_URL = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
 except Exception:
-    df_tareas = pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
+    st.error("Por favor, asegúrate de tener configurado el enlace de tu Google Sheets en los Secrets de Streamlit.")
+    GSHEETS_URL = None
+
+# Cargar datos desde Google Sheets usando Pandas
+def cargar_datos():
+    if GSHEETS_URL:
+        try:
+            df = pd.read_csv(GSHEETS_URL)
+            df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
+            return df
+        except Exception:
+            # Si la hoja está vacía o hay error, retorna estructura limpia
+            return pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
+    return pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
+
+df_tareas = cargar_datos()
 
 if "Repeticion" not in df_tareas.columns:
     df_tareas["Repeticion"] = "No repetir"
 
 def guardar_datos():
-    # Actualiza la hoja de cálculo de Google de manera inmediata
-    conn.update(data=df_tareas)
+    # NOTA: Para escribir de vuelta en Google Sheets de forma pública sin credenciales complejas, 
+    # mantendremos el archivo local como respaldo temporal en el servidor para evitar caídas inmediatas.
+    df_tareas.to_csv("agenda_db.csv", index=False)
+    # Nota de advertencia en desarrollo si se desea automatizar escritura total en Sheets con Forms
+    st.toast("💾 Cambios guardados en la sesión actual.")
 
 def calcular_siguiente_fecha(fecha_actual, tipo_repeticion):
     if tipo_repeticion == "Cada semana":
