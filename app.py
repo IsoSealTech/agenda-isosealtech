@@ -28,6 +28,7 @@ except Exception:
 
 # Cargar datos desde Google Sheets a través del puente
 def cargar_datos():
+    columnas_limpias = ["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"]
     if API_URL:
         try:
             response = requests.get(API_URL, timeout=10)
@@ -35,11 +36,19 @@ def cargar_datos():
                 datos_json = response.json()
                 if datos_json:
                     df = pd.DataFrame(datos_json)
+                    # Normalizar nombres de columnas por si vienen con guion bajo desde Google
+                    if "Fecha_Entrega" in df.columns:
+                        df = df.rename(columns={"Fecha_Entrega": "Fecha de Entrega"})
+                    
                     df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
-                    return df
+                    # Asegurar que todas las columnas requeridas existan
+                    for col in columnas_limpias:
+                        if col not in df.columns:
+                            df[col] = ""
+                    return df[columnas_limpias]
         except Exception:
             pass
-    return pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
+    return pd.DataFrame(columns=columnas_limpias)
 
 # Inicializar datos en la sesión
 if "df_tareas" not in st.session_state:
@@ -54,7 +63,7 @@ def guardar_datos():
     st.session_state.df_tareas = df_tareas
     if API_URL:
         try:
-            # Formatear las fechas como texto para que viajen limpias a Google
+            # Formatear las fechas y columnas para el script de Google
             df_copia = df_tareas.copy()
             df_copia["Fecha_Entrega"] = df_copia["Fecha de Entrega"].astype(str)
             datos_enviar = df_copia[["ID", "Tarea", "Fecha_Entrega", "Prioridad", "Estado", "Repeticion"]].to_dict(orient="records")
@@ -63,7 +72,7 @@ def guardar_datos():
             requests.post(API_URL, data=json.dumps(datos_enviar), headers={"Content-Type": "application/json"}, timeout=10)
             st.toast("💾 ¡Agenda sincronizada con Google Sheets!")
         except Exception as e:
-            st.toast("⚠️ Guardado localmente. Error de sincronización.")
+            st.toast("⚠️ Guardado localmente en la sesión.")
 
 def calcular_siguiente_fecha(fecha_actual, tipo_repeticion):
     if tipo_repeticion == "Cada semana":
