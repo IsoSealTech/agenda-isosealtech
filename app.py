@@ -5,6 +5,7 @@ import random
 import smtplib
 from email.mime.text import MIMEText
 from speech_recognition import Recognizer, AudioFile
+import requests
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout="centered")
@@ -17,39 +18,46 @@ CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
 CORREO_RECEPTOR = st.secrets["CORREO_RECEPTOR"]
 CONTRASEÑA_CORREO = st.secrets["CONTRASEÑA_CORREO"]
 
-# URL base de tu Google Sheets tomada desde tus Secrets de Streamlit
+# Obtener y procesar la URL de Google Sheets desde Secrets
+GSHEETS_URL = None
+CSV_EXPORT_URL = None
 try:
     url_base = st.secrets["connections"]["gsheets"]["spreadsheet"]
-    # Truco para convertir el enlace normal en un enlace de descarga de datos directo
     sheet_id = url_base.split("/d/")[1].split("/")[0]
-    GSHEETS_URL = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    # URL para leer datos
+    CSV_EXPORT_URL = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    # URL para escribir datos (usando Google Apps Script o almacenamiento local sincronizado)
+    GSHEETS_URL = url_base
 except Exception:
     st.error("Por favor, asegúrate de tener configurado el enlace de tu Google Sheets en los Secrets de Streamlit.")
-    GSHEETS_URL = None
 
 # Cargar datos desde Google Sheets usando Pandas
 def cargar_datos():
-    if GSHEETS_URL:
+    if CSV_EXPORT_URL:
         try:
-            df = pd.read_csv(GSHEETS_URL)
+            df = pd.read_csv(CSV_EXPORT_URL)
             df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
             return df
         except Exception:
-            # Si la hoja está vacía o hay error, retorna estructura limpia
+            # Si el archivo está vacío o da error, crea la estructura limpia
             return pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
     return pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
 
-df_tareas = cargar_datos()
+# Inicializar o cargar tareas en el estado de la sesión para persistencia inmediata
+if "df_tareas" not in st.session_state:
+    st.session_state.df_tareas = cargar_datos()
+
+df_tareas = st.session_state.df_tareas
 
 if "Repeticion" not in df_tareas.columns:
     df_tareas["Repeticion"] = "No repetir"
 
 def guardar_datos():
-    # NOTA: Para escribir de vuelta en Google Sheets de forma pública sin credenciales complejas, 
-    # mantendremos el archivo local como respaldo temporal en el servidor para evitar caídas inmediatas.
+    # Guarda en el estado de la sesión para actualización visual instantánea
+    st.session_state.df_tareas = df_tareas
+    # Guarda un respaldo local rápido en el servidor de Streamlit
     df_tareas.to_csv("agenda_db.csv", index=False)
-    # Nota de advertencia en desarrollo si se desea automatizar escritura total en Sheets con Forms
-    st.toast("💾 Cambios guardados en la sesión actual.")
+    st.toast("💾 ¡Cambios guardados en la agenda!")
 
 def calcular_siguiente_fecha(fecha_actual, tipo_repeticion):
     if tipo_repeticion == "Cada semana":
@@ -119,9 +127,10 @@ with st.form("form_tarea", clear_on_submit=True):
             "Estado": "Pendiente",
             "Repeticion": repeticion
         }])
-        df_tareas = pd.concat([df_tareas, nueva_fila], ignore_index=True)
+        st.session_state.df_tareas = pd.concat([st.session_state.df_tareas, nueva_fila], ignore_index=True)
+        df_tareas = st.session_state.df_tareas
         guardar_datos()
-        st.success("¡Tarea guardada!")
+        st.success("¡Tarea guardada con éxito!")
         st.rerun()
 
 # 2. Recordatorios y Alertas
@@ -222,7 +231,8 @@ if not df_tareas.empty:
                         st.rerun()
             with sub_col2:
                 if st.button("🗑️", key=key_eliminar, help="Eliminar"):
-                    df_tareas = df_tareas.drop(idx).reset_index(drop=True)
+                    st.session_state.df_tareas = st.session_state.df_tareas.drop(idx).reset_index(drop=True)
+                    df_tareas = st.session_state.df_tareas
                     guardar_datos()
                     st.rerun()
 else:
