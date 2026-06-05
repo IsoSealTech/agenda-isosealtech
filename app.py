@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from speech_recognition import Recognizer, AudioFile
 import requests
 import json
+import os
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout="centered")
@@ -36,12 +37,10 @@ def cargar_datos():
                 datos_json = response.json()
                 if datos_json:
                     df = pd.DataFrame(datos_json)
-                    # Normalizar nombres de columnas por si vienen con guion bajo desde Google
                     if "Fecha_Entrega" in df.columns:
                         df = df.rename(columns={"Fecha_Entrega": "Fecha de Entrega"})
                     
                     df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
-                    # Asegurar que todas las columnas requeridas existan
                     for col in columnas_limpias:
                         if col not in df.columns:
                             df[col] = ""
@@ -63,12 +62,10 @@ def guardar_datos():
     st.session_state.df_tareas = df_tareas
     if API_URL:
         try:
-            # Formatear las fechas y columnas para el script de Google
             df_copia = df_tareas.copy()
             df_copia["Fecha_Entrega"] = df_copia["Fecha de Entrega"].astype(str)
             datos_enviar = df_copia[["ID", "Tarea", "Fecha_Entrega", "Prioridad", "Estado", "Repeticion"]].to_dict(orient="records")
             
-            # Enviar los datos en segundo plano a Google Sheets
             requests.post(API_URL, data=json.dumps(datos_enviar), headers={"Content-Type": "application/json"}, timeout=10)
             st.toast("💾 ¡Agenda sincronizada con Google Sheets!")
         except Exception as e:
@@ -104,9 +101,17 @@ def enviar_alerta_correo(tareas_urgentes):
     except Exception as e:
         st.sidebar.error(f"No se pudo enviar el correo de alerta: {e}")
 
-# Título de la Aplicación
-st.title("📅 Mi Agenda Inteligente")
-st.write("Guarda tus pendientes por texto o voz de la forma más sencilla.")
+# Encabezado con Título a la izquierda y Logo de la Empresa a la derecha
+col_titulo, col_logo = st.columns([0.75, 0.25])
+
+with col_titulo:
+    st.title("📅 Mi Agenda Inteligente")
+    st.write("Guarda tus pendientes por texto o voz de la forma más sencilla.")
+
+with col_logo:
+    # Vinculación directa con el nombre exacto de tu archivo de imagen
+    if os.path.exists("LOGO ISOSEALTECH.jpg"):
+        st.image("LOGO ISOSEALTECH.jpg", use_container_width=True)
 
 # 1. Añadir Nueva Tarea
 st.subheader("Añadir Pendiente")
