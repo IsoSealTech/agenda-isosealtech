@@ -1,17 +1,15 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
-import os
 import random
 import smtplib
 from email.mime.text import MIMEText
 from speech_recognition import Recognizer, AudioFile
+from streamlit_gsheets import GSheetsConnection
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout="centered")
 
-# Archivo local para guardar las tareas
-DB_FILE = "agenda_db.csv"
 # Forzar la fecha real de Colombia (UTC -5) calculada desde la hora del servidor
 hoy_colombia = (datetime.utcnow() - timedelta(hours=5)).date()
 
@@ -20,18 +18,25 @@ CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
 CORREO_RECEPTOR = st.secrets["CORREO_RECEPTOR"]
 CONTRASEÑA_CORREO = st.secrets["CONTRASEÑA_CORREO"]
 
-# Cargar o inicializar la base de datos de tareas
-if os.path.exists(DB_FILE):
-    df_tareas = pd.read_csv(DB_FILE)
-    df_tareas["Fecha de Entrega"] = pd.to_datetime(df_tareas["Fecha de Entrega"]).dt.date
-else:
+# Conexión directa a Google Sheets
+conn = st.connection("gsheets", type="sheets")
+
+# Cargar datos desde Google Sheets
+try:
+    df_tareas = conn.read(ttl="0d") # ttl="0d" obliga a traer los datos más recientes sin usar caché
+    if df_tareas.empty:
+        df_tareas = pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
+    else:
+        df_tareas["Fecha de Entrega"] = pd.to_datetime(df_tareas["Fecha de Entrega"]).dt.date
+except Exception:
     df_tareas = pd.DataFrame(columns=["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"])
 
 if "Repeticion" not in df_tareas.columns:
     df_tareas["Repeticion"] = "No repetir"
 
 def guardar_datos():
-    df_tareas.to_csv(DB_FILE, index=False)
+    # Actualiza la hoja de cálculo de Google de manera inmediata
+    conn.update(data=df_tareas)
 
 def calcular_siguiente_fecha(fecha_actual, tipo_repeticion):
     if tipo_repeticion == "Cada semana":
@@ -140,7 +145,6 @@ st.subheader("🗃️ Todas mis Tareas")
 
 if not df_tareas.empty:
     for idx, row in df_tareas.iterrows():
-        # Rediseñamos el espacio en 5 columnas optimizadas
         col1, col2, col3, col4, col5 = st.columns([0.32, 0.18, 0.18, 0.18, 0.14])
         
         key_fecha = f"date_{idx}_{row['ID']}"
@@ -156,7 +160,6 @@ if not df_tareas.empty:
                 st.markdown(f"**{row['Tarea']}**")
                 
         with col2:
-            # 1. Selector de Fecha
             if row["Estado"] == "Pendiente":
                 nueva_fecha_cambiada = st.date_input("Fecha", value=row["Fecha de Entrega"], key=key_fecha, label_visibility="collapsed")
                 if nueva_fecha_cambiada != row["Fecha de Entrega"]:
@@ -167,7 +170,6 @@ if not df_tareas.empty:
                 st.caption(f"Terminada: {row['Fecha de Entrega']}")
                 
         with col3:
-            # 2. Selector de Repetición
             if row["Estado"] == "Pendiente":
                 opciones_rep = ["No repetir", "Cada semana", "Cada mes"]
                 idx_rep_actual = opciones_rep.index(row["Repeticion"]) if row["Repeticion"] in opciones_rep else 0
@@ -181,7 +183,6 @@ if not df_tareas.empty:
                 st.caption(f"Repite: {row['Repeticion']}")
                 
         with col4:
-            # 3. Selector de Prioridad Dinámica
             if row["Estado"] == "Pendiente":
                 opciones_prio = ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"]
                 idx_prio_actual = opciones_prio.index(row["Prioridad"]) if row["Prioridad"] in opciones_prio else 1
@@ -195,7 +196,6 @@ if not df_tareas.empty:
                 st.caption(f"Prio: {row['Prioridad']}")
                 
         with col5:
-            # Botones de Acción (✔ y 🗑️ juntos en la última columna para ahorrar espacio)
             sub_col1, sub_col2 = st.columns(2)
             with sub_col1:
                 if row["Estado"] == "Pendiente":
