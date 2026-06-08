@@ -43,7 +43,12 @@ def cargar_datos():
                     df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
                     for col in columnas_limpias:
                         if col not in df.columns:
-                            df[col] = ""
+                            if col == "Prioridad":
+                                df[col] = "Media (Importante)"
+                            elif col == "Repeticion" or col == "Estado":
+                                df[col] = "No repetir" if col == "Repeticion" else "Pendiente"
+                            else:
+                                df[col] = ""
                     return df[columnas_limpias]
         except Exception:
             pass
@@ -109,7 +114,6 @@ with col_titulo:
     st.write("Guarda tus pendientes por texto o voz de la forma más sencilla.")
 
 with col_logo:
-    # Vinculación directa con el nombre exacto de tu archivo de imagen
     if os.path.exists("LOGO ISOSEALTECH.jpg"):
         st.image("LOGO ISOSEALTECH.jpg", use_container_width=True)
 
@@ -132,8 +136,8 @@ if audio_value:
 with st.form("form_tarea", clear_on_submit=True):
     input_tarea = st.text_input("¿Qué debes hacer?", value=texto_tarea)
     fecha_entrega = st.date_input("Fecha límite / Recordatorio", value=hoy_colombia)
-    prioridad = st.selectbox("Prioridad / Necesidad", ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"])
-    repeticion = st.selectbox("¿Se repite esta tarea?", ["No repetir", "Cada semana", "Cada mes"])
+    prioridad_seleccionada = st.selectbox("Prioridad / Necesidad", ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"], index=1)
+    repeticion_seleccionada = st.selectbox("¿Se repite esta tarea?", ["No repetir", "Cada semana", "Cada mes"], index=0)
     
     enviar = st.form_submit_button("Guardar en la Agenda")
     
@@ -143,9 +147,9 @@ with st.form("form_tarea", clear_on_submit=True):
             "ID": nuevo_id,
             "Tarea": input_tarea,
             "Fecha de Entrega": fecha_entrega,
-            "Prioridad": prioridad,
+            "Prioridad": prioridad_seleccionada,
             "Estado": "Pendiente",
-            "Repeticion": repeticion
+            "Repeticion": repeticion_seleccionada
         }])
         st.session_state.df_tareas = pd.concat([st.session_state.df_tareas, nueva_fila], ignore_index=True)
         df_tareas = st.session_state.df_tareas
@@ -214,7 +218,8 @@ if not df_tareas.empty:
         with col3:
             if row["Estado"] == "Pendiente":
                 opciones_rep = ["No repetir", "Cada semana", "Cada mes"]
-                idx_rep_actual = opciones_rep.index(row["Repeticion"]) if row["Repeticion"] in opciones_rep else 0
+                val_rep = row["Repeticion"] if row["Repeticion"] in opciones_rep else "No repetir"
+                idx_rep_actual = opciones_rep.index(val_rep)
                 
                 nueva_rep_cambiada = st.selectbox("Repetición", options=opciones_rep, index=idx_rep_actual, key=key_rep, label_visibility="collapsed")
                 if nueva_rep_cambiada != row["Repeticion"]:
@@ -227,7 +232,8 @@ if not df_tareas.empty:
         with col4:
             if row["Estado"] == "Pendiente":
                 opciones_prio = ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"]
-                idx_prio_actual = opciones_prio.index(row["Prioridad"]) if row["Prioridad"] in opciones_prio else 1
+                val_prio = row["Prioridad"] if row["Prioridad"] in opciones_prio else "Media (Importante)"
+                idx_prio_actual = opciones_prio.index(val_prio)
                 
                 nueva_prio_cambiada = st.selectbox("Prioridad", options=opciones_prio, index=idx_prio_actual, key=key_prio, label_visibility="collapsed")
                 if nueva_prio_cambiada != row["Prioridad"]:
