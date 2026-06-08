@@ -63,7 +63,7 @@ df_tareas = st.session_state.df_tareas
 if "Repeticion" not in df_tareas.columns:
     df_tareas["Repeticion"] = "No repetir"
 
-# --- NUEVO: Controladores de memoria para el Grabador de Voz ---
+# Controladores de memoria para el Grabador de Voz
 if "texto_grabado" not in st.session_state:
     st.session_state.texto_grabado = ""
 if "ultimo_audio_id" not in st.session_state:
@@ -126,16 +126,156 @@ with col_logo:
 # 1. Añadir Nueva Tarea
 st.subheader("Añadir Pendiente")
 
-# Generamos un ID dinámico para el grabador de audio, permitiendo resetearlo al guardar
 if "audio_key" not in st.session_state:
     st.session_state.audio_key = "grabador_0"
 
 audio_value = st.audio_input("Graba tu tarea o reescríbela encima", key=st.session_state.audio_key)
 
-# Procesar el audio solo si es una grabación NUEVA y real
 if audio_value and audio_value != st.session_state.ultimo_audio_id:
     recognizer = Recognizer()
     try:
         with AudioFile(audio_value) as source:
             audio_data = recognizer.record(source)
-            texto_transcrito = recognizer.
+            texto_transcrito = recognizer.recognize_google(audio_data, language="es-ES")
+            st.session_state.texto_grabado = texto_transcrito
+            st.session_state.ultimo_audio_id = audio_value
+            st.success(f"📝 Transcrito con éxito: \"{texto_transcrito}\"")
+    except Exception as e:
+        st.error("No se pudo procesar el audio claramente. Intenta grabar de nuevo.")
+
+with st.form("form_tarea", clear_on_submit=True):
+    input_tarea = st.text_input("¿Qué debes hacer?", value=st.session_state.texto_grabado)
+    fecha_entrega = st.date_input("Fecha límite / Recordatorio", value=hoy_colombia)
+    prioridad_seleccionada = st.selectbox("Prioridad / Necesidad", ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"], index=1)
+    repeticion_seleccionada = st.selectbox("¿Se repite esta tarea?", ["No repetir", "Cada semana", "Cada mes"], index=0)
+    
+    enviar = st.form_submit_button("Guardar en la Agenda")
+    
+    if enviar and input_tarea:
+        nuevo_id = int(datetime.now().strftime("%Y%m%d%H%M%S")) + random.randint(1, 1000)
+        nueva_fila = pd.DataFrame([{
+            "ID": nuevo_id,
+            "Tarea": input_tarea,
+            "Fecha de Entrega": fecha_entrega,
+            "Prioridad": prioridad_seleccionada,
+            "Estado": "Pendiente",
+            "Repeticion": repeticion_seleccionada
+        }])
+        st.session_state.df_tareas = pd.concat([st.session_state.df_tareas, nueva_fila], ignore_index=True)
+        df_tareas = st.session_state.df_tareas
+        guardar_datos()
+        
+        st.session_state.texto_grabado = ""
+        st.session_state.ultimo_audio_id = None
+        num_actual = int(st.session_state.audio_key.split("_")[1])
+        st.session_state.audio_key = f"grabador_{num_actual + 1}"
+        
+        st.success("¡Tarea guardada con éxito!")
+        st.rerun()
+
+# 2. Recordatorios y Alertas
+st.subheader("👀 Alertas y Prioridades")
+
+hoy = hoy_colombia
+if not df_tareas.empty:
+    tareas_pendientes = df_tareas[df_tareas["Estado"] == "Pendiente"]
+else:
+    tareas_pendientes = pd.DataFrame()
+
+if not tareas_pendientes.empty:
+    urgentes = tareas_pendientes[tareas_pendientes["Fecha de Entrega"] <= hoy]
+    proximas = tareas_pendientes[tareas_pendientes["Fecha de Entrega"] > hoy].sort_values(by="Fecha de Entrega")
+    
+    if not urgentes.empty:
+        st.error(f"⚠️ ¡TIENES {len(urgentes)} TAREAS VENCIDAS O PARA HOY!")
+        for idx, row in urgentes.iterrows():
+            rep_text = f" ({row['Repeticion']})" if row['Repeticion'] != "No repetir" else ""
+            st.write(f"• **{row['Tarea']}** (Vence: {row['Fecha de Entrega']}){rep_text} - *[{row['Prioridad']}]*")
+        
+        if "alerta_enviada" not in st.session_state:
+            enviar_alerta_correo(urgentes)
+            st.session_state["alerta_enviada"] = True
+            
+    if not proximas.empty:
+        st.info("📅 Siguientes tareas en el calendario:")
+        st.dataframe(proximas[["Tarea", "Fecha de Entrega", "Prioridad", "Repeticion"]], use_container_width=True, hide_index=True)
+else:
+    st.success("🎉 ¡Estás al día!")
+
+# 3. Lista General y Gestión de Tareas
+st.subheader("🗃️ Todas mis Tareas")
+
+if not df_tareas.empty:
+    for idx, row in df_tareas.iterrows():
+        col1, col2, col3, col4, col5 = st.columns([0.32, 0.18, 0.18, 0.18, 0.14])
+        
+        key_fecha = f"date_{idx}_{row['ID']}"
+        key_rep = f"rep_{idx}_{row['ID']}"
+        key_prio = f"prio_{idx}_{row['ID']}"
+        key_completar = f"comp_{idx}_{row['ID']}"
+        key_eliminar = f"del_{idx}_{row['ID']}"
+        
+        with col1:
+            if row["Estado"] == "Completada":
+                st.markdown(f"~~{row['Tarea']}~~")
+            else:
+                st.markdown(f"**{row['Tarea']}**")
+                
+        with col2:
+            if row["Estado"] == "Pendiente":
+                nueva_fecha_cambiada = st.date_input("Fecha", value=row["Fecha de Entrega"], key=key_fecha, label_visibility="collapsed")
+                if nueva_fecha_cambiada != row["Fecha de Entrega"]:
+                    df_tareas.at[idx, "Fecha de Entrega"] = nueva_fecha_cambiada
+                    guardar_datos()
+                    st.rerun()
+            else:
+                st.caption(f"Terminada: {row['Fecha de Entrega']}")
+                
+        with col3:
+            if row["Estado"] == "Pendiente":
+                opciones_rep = ["No repetir", "Cada semana", "Cada mes"]
+                val_rep = row["Repeticion"] if row["Repeticion"] in opciones_rep else "No repetir"
+                idx_rep_actual = opciones_rep.index(val_rep)
+                
+                nueva_rep_cambiada = st.selectbox("Repetición", options=opciones_rep, index=idx_rep_actual, key=key_rep, label_visibility="collapsed")
+                if nueva_rep_cambiada != row["Repeticion"]:
+                    df_tareas.at[idx, "Repeticion"] = nueva_rep_cambiada
+                    guardar_datos()
+                    st.rerun()
+            else:
+                st.caption(f"Repite: {row['Repeticion']}")
+                
+        with col4:
+            if row["Estado"] == "Pendiente":
+                opciones_prio = ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"]
+                val_prio = row["Prioridad"] if row["Prioridad"] in opciones_prio else "Media (Importante)"
+                idx_prio_actual = opciones_prio.index(val_prio)
+                
+                nueva_prio_cambiada = st.selectbox("Prioridad", options=opciones_prio, index=idx_prio_actual, key=key_prio, label_visibility="collapsed")
+                if nueva_prio_cambiada != row["Prioridad"]:
+                    df_tareas.at[idx, "Prioridad"] = nueva_prio_cambiada
+                    guardar_datos()
+                    st.rerun()
+            else:
+                st.caption(f"Prio: {row['Prioridad']}")
+                
+        with col5:
+            sub_col1, sub_col2 = st.columns(2)
+            with sub_col1:
+                if row["Estado"] == "Pendiente":
+                    if st.button("✔", key=key_completar, help="Completar"):
+                        if row["Repeticion"] != "No repetir":
+                            nueva_fecha = calcular_siguiente_fecha(row["Fecha de Entrega"], row["Repeticion"])
+                            df_tareas.at[idx, "Fecha de Entrega"] = nueva_fecha
+                        else:
+                            df_tareas.at[idx, "Estado"] = "Completada"
+                        guardar_datos()
+                        st.rerun()
+            with sub_col2:
+                if st.button("🗑️", key=key_eliminar, help="Eliminar"):
+                    st.session_state.df_tareas = st.session_state.df_tareas.drop(idx).reset_index(drop=True)
+                    df_tareas = st.session_state.df_tareas
+                    guardar_datos()
+                    st.rerun()
+else:
+    st.caption("La agenda está vacía.")
