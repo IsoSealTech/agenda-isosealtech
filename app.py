@@ -27,49 +27,67 @@ try:
 except Exception:
     st.error("Por favor, configura la URL de la aplicación web en los Secrets.")
 
+# Diccionarios de mapeo para evitar errores de texto con paréntesis en la base de datos
+MAPEO_PRIORIDAD_PANTALLA = {
+    "alta": "Alta (Urgente)",
+    "media": "Media (Importante)",
+    "baja": "Baja (Rutina)"
+}
+MAPEO_PRIORIDAD_BASE = {
+    "Alta (Urgente)": "alta",
+    "Media (Importante)": "media",
+    "Baja (Rutina)": "baja"
+}
+
+MAPEO_REP_PANTALLA = {
+    "semana": "Cada semana",
+    "mes": "Cada mes",
+    "no": "No repetir"
+}
+MAPEO_REP_BASE = {
+    "Cada semana": "semana",
+    "Cada mes": "mes",
+    "No repetir": "no"
+}
+
 # Cargar datos desde Google Sheets a través del puente
 def cargar_datos():
     columnas_limpias = ["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"]
     if API_URL:
         try:
-            # PARCHE ANTICACHÉ: Agregamos un número aleatorio al final de la URL (?t=...) 
-            # para engañar a los celulares y obligarlos a descargar los datos reales en vivo.
             url_en_vivo = f"{API_URL}?t={int(datetime.now().timestamp())}"
-            
             response = requests.get(url_en_vivo, timeout=10)
             if response.status_code == 200:
                 datos_json = response.json()
                 if datos_json:
                     df = pd.DataFrame(datos_json)
                     
-                    # 1. Normalizar nombre de la columna fecha
                     if "Fecha_Entrega" in df.columns:
                         df = df.rename(columns={"Fecha_Entrega": "Fecha de Entrega"})
                     
-                    # 2. Asegurar que existan todas las columnas requeridas
                     for col in columnas_limpias:
                         if col not in df.columns:
                             df[col] = ""
                     
-                    # 3. Compatibilidad total de textos
                     df["Estado"] = df["Estado"].fillna("Pendiente").astype(str).str.strip()
                     df["Estado"] = df["Estado"].apply(lambda x: "Pendiente" if x == "" else x)
                     
-                    df["Prioridad"] = df["Prioridad"].fillna("Media (Importante)").astype(str).str.strip()
+                    # NORMALIZACIÓN ROBUSTA DE PRIORIDAD
+                    df["Prioridad"] = df["Prioridad"].fillna("media").astype(str).str.strip().str.lower()
                     df["Prioridad"] = df["Prioridad"].apply(
-                        lambda x: "Alta (Urgente)" if "alt" in x.lower() 
-                        else ("Baja (Rutina)" if "baj" in x.lower() 
-                        else "Media (Importante)")
+                        lambda x: "alta" if "alt" in x 
+                        else ("baja" if "baj" in x 
+                        else "media")
                     )
                     
-                    df["Repeticion"] = df["Repeticion"].fillna("No repetir").astype(str).str.strip()
+                    # NORMALIZACIÓN ROBUSTA DE REPETICIÓN
+                    df["Repeticion"] = df["Repeticion"].fillna("no").astype(str).str.strip().str.lower()
                     df["Repeticion"] = df["Repeticion"].apply(
-                        lambda x: "Cada semana" if "seman" in x.lower() 
-                        else ("Cada mes" if "mes" in x.lower() 
-                        else "No repetir")
+                        lambda x: "semana" if "seman" in x 
+                        else ("mes" if "mes" in x 
+                        else "no")
                     )
                     
-                    # Convertir la fecha a formato seguro
                     df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"], errors='coerce').dt.date
                     df["Fecha de Entrega"] = df["Fecha de Entrega"].fillna(hoy_colombia)
                     
@@ -78,7 +96,7 @@ def cargar_datos():
             pass
     return pd.DataFrame(columns=columnas_limpias)
 
-# Inicializar datos en la sesión de forma limpia
+# Inicializar datos en la sesión
 if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
@@ -104,9 +122,9 @@ def guardar_datos():
             st.toast("⚠️ Guardado localmente en la sesión.")
 
 def calcular_siguiente_fecha(fecha_actual, tipo_repeticion):
-    if tipo_repeticion == "Cada semana":
+    if tipo_repeticion == "semana":
         return fecha_actual + timedelta(weeks=1)
-    elif tipo_repeticion == "Cada mes":
+    elif tipo_repeticion == "mes":
         return fecha_actual + timedelta(days=30)
     return fecha_actual
 
@@ -116,7 +134,8 @@ def enviar_alerta_correo(tareas_urgentes):
     try:
         cuerpo = "Hola, tienes pendientes urgentes para revisar hoy en tu Agenda Inteligente:\n\n"
         for _, row in tareas_urgentes.iterrows():
-            cuerpo += f"• Tarea: {row['Tarea']} | Vence: {row['Fecha de Entrega']} | Prioridad: {row['Prioridad']}\n"
+            prio_panta = MAPEO_PRIORIDAD_PANTALLA.get(row['Prioridad'], "Media (Importante)")
+            cuerpo += f"• Tarea: {row['Tarea']} | Vence: {row['Fecha de Entrega']} | Prioridad: {prio_panta}\n"
         cuerpo += "\n¡Que tengas un excelente y productivo día!"
         
         msg = MIMEText(cuerpo)
@@ -178,9 +197,9 @@ with st.form("form_tarea", clear_on_submit=True):
             "ID": nuevo_id,
             "Tarea": input_tarea,
             "Fecha de Entrega": fecha_entrega,
-            "Prioridad": prioridad_seleccionada,
+            "Prioridad": MAPEO_PRIORIDAD_BASE[prioridad_seleccionada],
             "Estado": "Pendiente",
-            "Repeticion": repeticion_seleccionada
+            "Repeticion": MAPEO_REP_BASE[repeticion_seleccionada]
         }])
         st.session_state.df_tareas = pd.concat([st.session_state.df_tareas, nueva_fila], ignore_index=True)
         df_tareas = st.session_state.df_tareas
@@ -205,13 +224,16 @@ else:
 
 if not tareas_pendientes.empty:
     urgentes = tareas_pendientes[tareas_pendientes["Fecha de Entrega"] <= hoy]
-    proximas = tareas_pendientes[tareas_pendientes["Fecha de Entrega"] > hoy].sort_values(by="Fecha de Entrega")
+    proximas = tareas_pendientes[tareas_pendientes["Fecha de Entrega"] > hoy].copy()
     
     if not urgentes.empty:
         st.error(f"⚠️ ¡TIENES {len(urgentes)} TAREAS VENCIDAS O PARA HOY!")
         for idx, row in urgentes.iterrows():
-            rep_text = f" ({row['Repeticion']})" if row['Repeticion'] != "No repetir" else ""
-            st.write(f"• **{row['Tarea']}** (Vence: {row['Fecha de Entrega']}){rep_text} - *[{row['Prioridad']}]*")
+            rep_llave = row['Repeticion']
+            rep_panta = MAPEO_REP_PANTALLA.get(rep_llave, "No repetir")
+            rep_text = f" ({rep_panta})" if rep_llave != "no" else ""
+            prio_panta = MAPEO_PRIORIDAD_PANTALLA.get(row['Prioridad'], "Media (Importante)")
+            st.write(f"• **{row['Tarea']}** (Vence: {row['Fecha de Entrega']}){rep_text} - *[{prio_panta}]*")
         
         if "alerta_enviada" not in st.session_state:
             enviar_alerta_correo(urgentes)
@@ -219,7 +241,10 @@ if not tareas_pendientes.empty:
             
     if not proximas.empty:
         st.info("📅 Siguientes tareas en el calendario:")
-        st.dataframe(proximas[["Tarea", "Fecha de Entrega", "Prioridad", "Repeticion"]], use_container_width=True, hide_index=True)
+        proximas["Prioridad_Vista"] = proximas["Prioridad"].map(MAPEO_PRIORIDAD_PANTALLA).fillna("Media (Importante)")
+        proximas["Repeticion_Vista"] = proximas["Repeticion"].map(MAPEO_REP_PANTALLA).fillna("No repetir")
+        proximas_ordenadas = proximas.sort_values(by="Fecha de Entrega")
+        st.dataframe(proximas_ordenadas[["Tarea", "Fecha de Entrega", "Prioridad_Vista", "Repeticion_Vista"]].rename(columns={"Prioridad_Vista": "Prioridad", "Repeticion_Vista": "Repeticion"}), use_container_width=True, hide_index=True)
 else:
     st.success("🎉 ¡Estás al día!")
 
@@ -254,53 +279,20 @@ if not df_tareas.empty:
                 
         with col3:
             if row["Estado"] == "Pendiente":
-                opciones_rep = ["No repetir", "Cada semana", "Cada mes"]
-                val_rep = str(row["Repeticion"]).strip()
-                if val_rep not in opciones_rep:
-                    val_rep = "No repetir"
-                idx_rep_actual = opciones_rep.index(val_rep)
+                opciones_rep_panta = ["No repetir", "Cada semana", "Cada mes"]
+                rep_base = row["Repeticion"] if row["Repeticion"] in MAPEO_REP_PANTALLA else "no"
+                val_rep_panta = MAPEO_REP_PANTALLA[rep_base]
+                idx_rep_actual = opciones_rep_panta.index(val_rep_panta)
                 
-                nueva_rep_cambiada = st.selectbox("Repetición", options=opciones_rep, index=idx_rep_actual, key=key_rep, label_visibility="collapsed")
-                if nueva_rep_cambiada != row["Repeticion"]:
-                    df_tareas.at[idx, "Repeticion"] = nueva_rep_cambiada
+                nueva_rep_cambiada_panta = st.selectbox("Repetición", options=opciones_rep_panta, index=idx_rep_actual, key=key_rep, label_visibility="collapsed")
+                nueva_rep_base = MAPEO_REP_BASE[nueva_rep_cambiada_panta]
+                if nueva_rep_base != row["Repeticion"]:
+                    df_tareas.at[idx, "Repeticion"] = nueva_rep_base
                     guardar_datos()
                     st.rerun()
             else:
-                st.caption(f"Repite: {row['Repeticion']}")
+                st.caption(f"Repite: {MAPEO_REP_PANTALLA.get(row['Repeticion'], 'No repetir')}")
                 
         with col4:
             if row["Estado"] == "Pendiente":
-                opciones_prio = ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"]
-                val_prio = str(row["Prioridad"]).strip()
-                if val_prio not in opciones_prio:
-                    val_prio = "Media (Importante)"
-                idx_prio_actual = opciones_prio.index(val_prio)
-                
-                nueva_prio_cambiada = st.selectbox("Prioridad", options=opciones_prio, index=idx_prio_actual, key=key_prio, label_visibility="collapsed")
-                if nueva_prio_cambiada != row["Prioridad"]:
-                    df_tareas.at[idx, "Prioridad"] = nueva_prio_cambiada
-                    guardar_datos()
-                    st.rerun()
-            else:
-                st.caption(f"Prio: {row['Prioridad']}")
-                
-        with col5:
-            sub_col1, sub_col2 = st.columns(2)
-            with sub_col1:
-                if row["Estado"] == "Pendiente":
-                    if st.button("✔", key=key_completar, help="Completar"):
-                        if row["Repeticion"] != "No repetir":
-                            nueva_fecha = calcular_siguiente_fecha(row["Fecha de Entrega"], row["Repeticion"])
-                            df_tareas.at[idx, "Fecha de Entrega"] = nueva_fecha
-                        else:
-                            df_tareas.at[idx, "Estado"] = "Completada"
-                        guardar_datos()
-                        st.rerun()
-            with sub_col2:
-                if st.button("🗑️", key=key_eliminar, help="Eliminar"):
-                    st.session_state.df_tareas = st.session_state.df_tareas.drop(idx).reset_index(drop=True)
-                    df_tareas = st.session_state.df_tareas
-                    guardar_datos()
-                    st.rerun()
-else:
-    st.caption("La agenda está vacía.")
+                opciones_p
