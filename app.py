@@ -32,7 +32,11 @@ def cargar_datos():
     columnas_limpias = ["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"]
     if API_URL:
         try:
-            response = requests.get(API_URL, timeout=10)
+            # PARCHE ANTICACHÉ: Agregamos un número aleatorio al final de la URL (?t=...) 
+            # para engañar a los celulares y obligarlos a descargar los datos reales en vivo.
+            url_en_vivo = f"{API_URL}?t={int(datetime.now().timestamp())}"
+            
+            response = requests.get(url_en_vivo, timeout=10)
             if response.status_code == 200:
                 datos_json = response.json()
                 if datos_json:
@@ -47,26 +51,25 @@ def cargar_datos():
                         if col not in df.columns:
                             df[col] = ""
                     
-                    # 3. COMPATIBILIDAD TOTAL: Convertir datos viejos a formatos legibles sin borrarlos
-                    df["Estado"] = df["Estado"].fillna("Pendiente").astype(str).strip()
+                    # 3. Compatibilidad total de textos
+                    df["Estado"] = df["Estado"].fillna("Pendiente").astype(str).str.strip()
                     df["Estado"] = df["Estado"].apply(lambda x: "Pendiente" if x == "" else x)
                     
-                    df["Prioridad"] = df["Prioridad"].fillna("Media (Importante)").astype(str).strip()
-                    # Si tu tarea vieja decía solo "Alta", "Media" o "Baja", la adaptamos automáticamente
+                    df["Prioridad"] = df["Prioridad"].fillna("Media (Importante)").astype(str).str.strip()
                     df["Prioridad"] = df["Prioridad"].apply(
                         lambda x: "Alta (Urgente)" if "alt" in x.lower() 
                         else ("Baja (Rutina)" if "baj" in x.lower() 
                         else "Media (Importante)")
                     )
                     
-                    df["Repeticion"] = df["Repeticion"].fillna("No repetir").astype(str).strip()
+                    df["Repeticion"] = df["Repeticion"].fillna("No repetir").astype(str).str.strip()
                     df["Repeticion"] = df["Repeticion"].apply(
                         lambda x: "Cada semana" if "seman" in x.lower() 
                         else ("Cada mes" if "mes" in x.lower() 
                         else "No repetir")
                     )
                     
-                    # Convertir la fecha a formato de objeto fecha de Python de forma segura
+                    # Convertir la fecha a formato seguro
                     df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"], errors='coerce').dt.date
                     df["Fecha de Entrega"] = df["Fecha de Entrega"].fillna(hoy_colombia)
                     
@@ -75,7 +78,7 @@ def cargar_datos():
             pass
     return pd.DataFrame(columns=columnas_limpias)
 
-# Inicializar datos en la sesión
+# Inicializar datos en la sesión de forma limpia
 if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
