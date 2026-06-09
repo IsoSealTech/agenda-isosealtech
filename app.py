@@ -134,7 +134,8 @@ def enviar_alerta_correo(tareas_urgentes):
     try:
         cuerpo = "Hola, tienes pendientes urgentes para revisar hoy en tu Agenda Inteligente:\n\n"
         for _, row in tareas_urgentes.iterrows():
-            prio_panta = MAPEO_PRIORIDAD_PANTALLA.get(row['Prioridad'], "Media (Importante)")
+            prio_val = row.get('Prioridad', 'media')
+            prio_panta = MAPEO_PRIORIDAD_PANTALLA.get(prio_val, "Media (Importante)")
             cuerpo += f"• Tarea: {row['Tarea']} | Vence: {row['Fecha de Entrega']} | Prioridad: {prio_panta}\n"
         cuerpo += "\n¡Que tengas un excelente y productivo día!"
         
@@ -229,10 +230,12 @@ if not tareas_pendientes.empty:
     if not urgentes.empty:
         st.error(f"⚠️ ¡TIENES {len(urgentes)} TAREAS VENCIDAS O PARA HOY!")
         for idx, row in urgentes.iterrows():
-            rep_llave = row['Repeticion']
+            rep_llave = row.get('Repeticion', 'no')
             rep_panta = MAPEO_REP_PANTALLA.get(rep_llave, "No repetir")
             rep_text = f" ({rep_panta})" if rep_llave != "no" else ""
-            prio_panta = MAPEO_PRIORIDAD_PANTALLA.get(row['Prioridad'], "Media (Importante)")
+            
+            prio_val = row.get('Prioridad', 'media')
+            prio_panta = MAPEO_PRIORIDAD_PANTALLA.get(prio_val, "Media (Importante)")
             st.write(f"• **{row['Tarea']}** (Vence: {row['Fecha de Entrega']}){rep_text} - *[{prio_panta}]*")
         
         if "alerta_enviada" not in st.session_state:
@@ -280,7 +283,9 @@ if not df_tareas.empty:
         with col3:
             if row["Estado"] == "Pendiente":
                 opciones_rep_panta = ["No repetir", "Cada semana", "Cada mes"]
-                rep_base = row["Repeticion"] if row["Repeticion"] in MAPEO_REP_PANTALLA else "no"
+                rep_base = row.get("Repeticion", "no")
+                if rep_base not in MAPEO_REP_PANTALLA:
+                    rep_base = "no"
                 val_rep_panta = MAPEO_REP_PANTALLA[rep_base]
                 idx_rep_actual = opciones_rep_panta.index(val_rep_panta)
                 
@@ -291,8 +296,43 @@ if not df_tareas.empty:
                     guardar_datos()
                     st.rerun()
             else:
-                st.caption(f"Repite: {MAPEO_REP_PANTALLA.get(row['Repeticion'], 'No repetir')}")
+                st.caption(f"Repite: {MAPEO_REP_PANTALLA.get(row.get('Repeticion', 'no'), 'No repetir')}")
                 
         with col4:
             if row["Estado"] == "Pendiente":
-                opciones_p
+                opciones_prio_panta = ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"]
+                prio_base = row.get("Prioridad", "media")
+                if prio_base not in MAPEO_PRIORIDAD_PANTALLA:
+                    prio_base = "media"
+                val_prio_panta = MAPEO_PRIORIDAD_PANTALLA[prio_base]
+                idx_prio_actual = opciones_prio_panta.index(val_prio_panta)
+                
+                nueva_prio_cambiada_panta = st.selectbox("Prioridad", options=opciones_prio_panta, index=idx_prio_actual, key=key_prio, label_visibility="collapsed")
+                nueva_prio_base = MAPEO_PRIORIDAD_BASE[nueva_prio_cambiada_panta]
+                if nueva_prio_base != row["Prioridad"]:
+                    df_tareas.at[idx, "Prioridad"] = nueva_prio_base
+                    guardar_datos()
+                    st.rerun()
+            else:
+                st.caption(f"Prio: {MAPEO_PRIORIDAD_PANTALLA.get(row.get('Prioridad', 'media'), 'Media (Importante)')}")
+                
+        with col5:
+            sub_col1, sub_col2 = st.columns(2)
+            with sub_col1:
+                if row["Estado"] == "Pendiente":
+                    if st.button("✔", key=key_completar, help="Completar"):
+                        if row["Repeticion"] != "no":
+                            nueva_fecha = calcular_siguiente_fecha(row["Fecha de Entrega"], row["Repeticion"])
+                            df_tareas.at[idx, "Fecha de Entrega"] = nueva_fecha
+                        else:
+                            df_tareas.at[idx, "Estado"] = "Completada"
+                        guardar_datos()
+                        st.rerun()
+            with sub_col2:
+                if st.button("🗑️", key=key_eliminar, help="Eliminar"):
+                    st.session_state.df_tareas = st.session_state.df_tareas.drop(idx).reset_index(drop=True)
+                    df_tareas = st.session_state.df_tareas
+                    guardar_datos()
+                    st.rerun()
+else:
+    st.caption("La agenda está vacía.")
