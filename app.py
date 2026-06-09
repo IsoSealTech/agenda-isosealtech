@@ -42,22 +42,33 @@ def cargar_datos():
                     if "Fecha_Entrega" in df.columns:
                         df = df.rename(columns={"Fecha_Entrega": "Fecha de Entrega"})
                     
-                    # 2. Asegurar que existan todas las columnas requeridas sin pisar los datos existentes
+                    # 2. Asegurar que existan todas las columnas requeridas
                     for col in columnas_limpias:
                         if col not in df.columns:
                             df[col] = ""
                     
-                    # 3. Limpiar valores vacíos o nulos específicos en Prioridad y Repetición
-                    df["Prioridad"] = df["Prioridad"].fillna("Media (Importante)").strip()
-                    df["Prioridad"] = df["Prioridad"].apply(lambda x: x if x in ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"] else "Media (Importante)")
+                    # 3. COMPATIBILIDAD TOTAL: Convertir datos viejos a formatos legibles sin borrarlos
+                    df["Estado"] = df["Estado"].fillna("Pendiente").astype(str).strip()
+                    df["Estado"] = df["Estado"].apply(lambda x: "Pendiente" if x == "" else x)
                     
-                    df["Repeticion"] = df["Repeticion"].fillna("No repetir").strip()
-                    df["Repeticion"] = df["Repeticion"].apply(lambda x: x if x in ["No repetir", "Cada semana", "Cada mes"] else "No repetir")
+                    df["Prioridad"] = df["Prioridad"].fillna("Media (Importante)").astype(str).strip()
+                    # Si tu tarea vieja decía solo "Alta", "Media" o "Baja", la adaptamos automáticamente
+                    df["Prioridad"] = df["Prioridad"].apply(
+                        lambda x: "Alta (Urgente)" if "alt" in x.lower() 
+                        else ("Baja (Rutina)" if "baj" in x.lower() 
+                        else "Media (Importante)")
+                    )
                     
-                    df["Estado"] = df["Estado"].fillna("Pendiente").strip()
+                    df["Repeticion"] = df["Repeticion"].fillna("No repetir").astype(str).strip()
+                    df["Repeticion"] = df["Repeticion"].apply(
+                        lambda x: "Cada semana" if "seman" in x.lower() 
+                        else ("Cada mes" if "mes" in x.lower() 
+                        else "No repetir")
+                    )
                     
-                    # Convertir la fecha a formato de objeto fecha de Python
-                    df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
+                    # Convertir la fecha a formato de objeto fecha de Python de forma segura
+                    df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"], errors='coerce').dt.date
+                    df["Fecha de Entrega"] = df["Fecha de Entrega"].fillna(hoy_colombia)
                     
                     return df[columnas_limpias]
         except Exception:
