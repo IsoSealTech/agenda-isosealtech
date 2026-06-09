@@ -37,18 +37,28 @@ def cargar_datos():
                 datos_json = response.json()
                 if datos_json:
                     df = pd.DataFrame(datos_json)
+                    
+                    # 1. Normalizar nombre de la columna fecha
                     if "Fecha_Entrega" in df.columns:
                         df = df.rename(columns={"Fecha_Entrega": "Fecha de Entrega"})
                     
-                    df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
+                    # 2. Asegurar que existan todas las columnas requeridas sin pisar los datos existentes
                     for col in columnas_limpias:
                         if col not in df.columns:
-                            if col == "Prioridad":
-                                df[col] = "Media (Importante)"
-                            elif col == "Repeticion" or col == "Estado":
-                                df[col] = "No repetir" if col == "Repeticion" else "Pendiente"
-                            else:
-                                df[col] = ""
+                            df[col] = ""
+                    
+                    # 3. Limpiar valores vacíos o nulos específicos en Prioridad y Repetición
+                    df["Prioridad"] = df["Prioridad"].fillna("Media (Importante)").strip()
+                    df["Prioridad"] = df["Prioridad"].apply(lambda x: x if x in ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"] else "Media (Importante)")
+                    
+                    df["Repeticion"] = df["Repeticion"].fillna("No repetir").strip()
+                    df["Repeticion"] = df["Repeticion"].apply(lambda x: x if x in ["No repetir", "Cada semana", "Cada mes"] else "No repetir")
+                    
+                    df["Estado"] = df["Estado"].fillna("Pendiente").strip()
+                    
+                    # Convertir la fecha a formato de objeto fecha de Python
+                    df["Fecha de Entrega"] = pd.to_datetime(df["Fecha de Entrega"]).dt.date
+                    
                     return df[columnas_limpias]
         except Exception:
             pass
@@ -59,9 +69,6 @@ if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
 df_tareas = st.session_state.df_tareas
-
-if "Repeticion" not in df_tareas.columns:
-    df_tareas["Repeticion"] = "No repetir"
 
 # Controladores de memoria para el Grabador de Voz
 if "texto_grabado" not in st.session_state:
@@ -234,7 +241,9 @@ if not df_tareas.empty:
         with col3:
             if row["Estado"] == "Pendiente":
                 opciones_rep = ["No repetir", "Cada semana", "Cada mes"]
-                val_rep = row["Repeticion"] if row["Repeticion"] in opciones_rep else "No repetir"
+                val_rep = str(row["Repeticion"]).strip()
+                if val_rep not in opciones_rep:
+                    val_rep = "No repetir"
                 idx_rep_actual = opciones_rep.index(val_rep)
                 
                 nueva_rep_cambiada = st.selectbox("Repetición", options=opciones_rep, index=idx_rep_actual, key=key_rep, label_visibility="collapsed")
@@ -248,7 +257,9 @@ if not df_tareas.empty:
         with col4:
             if row["Estado"] == "Pendiente":
                 opciones_prio = ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"]
-                val_prio = row["Prioridad"] if row["Prioridad"] in opciones_prio else "Media (Importante)"
+                val_prio = str(row["Prioridad"]).strip()
+                if val_prio not in opciones_prio:
+                    val_prio = "Media (Importante)"
                 idx_prio_actual = opciones_prio.index(val_prio)
                 
                 nueva_prio_cambiada = st.selectbox("Prioridad", options=opciones_prio, index=idx_prio_actual, key=key_prio, label_visibility="collapsed")
