@@ -16,6 +16,9 @@ st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout=
 ahora_colombia = datetime.utcnow() - timedelta(hours=5)
 hoy_colombia = ahora_colombia.date()
 
+# Convertir la hora de comparación a un formato compatible de Pandas Timestamp para evitar el TypeError
+ahora_colombia_ts = pd.Timestamp(ahora_colombia)
+
 # CONFIGURACIÓN DEL CORREO DESDE LOS SECRETOS DE LA NUBE
 CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
 CORREO_RECEPTOR = st.secrets["CORREO_RECEPTOR"]
@@ -106,7 +109,7 @@ def cargar_datos():
             pass
     return pd.DataFrame(columns=columnas_limpias)
 
-# Inicializar o refrescar datos en la sesión
+# Inicializar o refrescar datos en la sesión (Solo carga de internet si la sesión está en blanco)
 if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
@@ -171,6 +174,11 @@ col_titulo, col_logo = st.columns([0.75, 0.25])
 with col_titulo:
     st.title("📅 Mi Agenda Inteligente")
     st.write("Guarda tus pendientes por texto o voz de la forma más sencilla.")
+    
+    # Botón manual para actualizar datos en la tableta o celular
+    if st.button("🔄 Sincronizar / Traer Datos de Google", help="Haz clic aquí si agregaste tareas en otro dispositivo"):
+        st.session_state.df_tareas = cargar_datos()
+        st.rerun()
 
 with col_logo:
     if os.path.exists("LOGO ISOSEALTECH.jpg"):
@@ -243,12 +251,12 @@ else:
     tareas_pendientes = pd.DataFrame()
 
 if not tareas_pendientes.empty:
-    # Corrección segura del error de tipo: Parsear la columna a Datetime real antes de comparar
+    # Solución definitiva al TypeError: Convertir de forma segura usando el Timestamp unificado de Pandas
     tareas_pendientes["dt_obj"] = pd.to_datetime(tareas_pendientes["Fecha_Hora_Entrega"], errors='coerce')
-    tareas_pendientes["dt_obj"] = tareas_pendientes["dt_obj"].fillna(ahora_colombia)
+    tareas_pendientes["dt_obj"] = tareas_pendientes["dt_obj"].fillna(ahora_colombia_ts)
     
-    urgentes = tareas_pendientes[tareas_pendientes["dt_obj"] <= ahora_colombia]
-    proximas = tareas_pendientes[tareas_pendientes["dt_obj"] > ahora_colombia].copy()
+    urgentes = tareas_pendientes[tareas_pendientes["dt_obj"] <= ahora_colombia_ts]
+    proximas = tareas_pendientes[tareas_pendientes["dt_obj"] > ahora_colombia_ts].copy()
     
     if not urgentes.empty:
         st.error(f"⚠️ ¡TIENES {len(urgentes)} TAREAS ACTIVAS O VENCIDAS!")
