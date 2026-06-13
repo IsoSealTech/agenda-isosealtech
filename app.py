@@ -30,49 +30,24 @@ try:
 except Exception:
     st.error("Por favor, configura la URL de la aplicación web en los Secrets.")
 
-# Diccionarios de mapeo estables de doble vía
-MAPEO_PRIORIDAD_PANTALLA = {
-    "alta": "Alta (Urgente)",
-    "media": "Media (Importante)",
-    "baja": "Baja (Rutina)"
-}
-MAPEO_PRIORIDAD_BASE = {
-    "Alta (Urgente)": "alta",
-    "Media (Importante)": "media",
-    "Baja (Rutina)": "baja"
-}
-
-MAPEO_REP_PANTALLA = {
-    "no": "No repetir",
-    "dia_semana": "Un día específico (Cada semana)",
-    "todos_dias": "Todos los días (Semana específica)",
-    "mes_especifico": "Todo un mes específico"
-}
-MAPEO_REP_BASE = {
-    "No repetir": "no",
-    "Un día específico (Cada semana)": "dia_semana",
-    "Todos los días (Semana específica)": "todos_dias",
-    "Todo un mes específico": "mes_especifico"
-}
-
-# Funciones de normalización seguras
+# Funciones de normalización de texto directo (Sin diccionarios intermediarios)
 def normalizar_prioridad(x):
     val = str(x).strip().lower()
-    if "alt" in val:
-        return "alta"
-    elif "baj" in val:
-        return "baja"
-    return "media"
+    if "alt" in val or "urg" in val:
+        return "Alta (Urgente)"
+    elif "baj" in val or "rut" in val:
+        return "Baja (Rutina)"
+    return "Media (Importante)"
 
 def normalizar_repeticion(x):
     val = str(x).strip().lower()
     if "dia_s" in val or "seman" in val:
-        return "dia_semana"
+        return "Un día específico (Cada semana)"
     elif "todos" in val or "todos_d" in val:
-        return "todos_dias"
+        return "Todos los días (Semana específica)"
     elif "mes" in val:
-        return "mes_especifico"
-    return "no"
+        return "Todo un mes específico"
+    return "No repetir"
 
 def normalizar_fecha_hora(x):
     val = str(x).strip().replace("/", "-")
@@ -88,7 +63,7 @@ def normalizar_fecha_hora(x):
 
 # Cargar datos desde Google Sheets a través del puente
 def cargar_datos():
-    columnas_limpias = ["ID", "Tarea", "Fecha_Hora_Entrega", "Prioridad", "Estado", "Repeticion"]
+    columnas_internas = ["ID", "Tarea", "Fecha_Hora_Entrega", "Prioridad", "Estado", "Repeticion"]
     if API_URL:
         try:
             url_en_vivo = f"{API_URL}?t={int(datetime.now().timestamp())}"
@@ -98,13 +73,13 @@ def cargar_datos():
                 if datos_json:
                     df = pd.DataFrame(datos_json)
                     
-                    # Soporte de migración para columnas anteriores sin perder datos
+                    # Normalizar el nombre de la columna física de tu Excel de forma transparente
                     if "Fecha de Entrega" in df.columns:
                         df = df.rename(columns={"Fecha de Entrega": "Fecha_Hora_Entrega"})
                     elif "Fecha_Entrega" in df.columns:
                         df = df.rename(columns={"Fecha_Entrega": "Fecha_Hora_Entrega"})
                     
-                    for col in columnas_limpias:
+                    for col in columnas_internas:
                         if col not in df.columns:
                             df[col] = ""
                     
@@ -115,18 +90,16 @@ def cargar_datos():
                     df["Repeticion"] = df["Repeticion"].apply(normalizar_repeticion)
                     df["Fecha_Hora_Entrega"] = df["Fecha_Hora_Entrega"].apply(normalizar_fecha_hora)
                     
-                    # --- FILTRO ANTIDUPLICADOS SALVAVIDAS ---
                     df = df.drop_duplicates(subset=["ID"])
-                    return df[columnas_limpias]
+                    return df[columnas_internas]
         except Exception:
             pass
-    return pd.DataFrame(columns=columnas_limpias)
+    return pd.DataFrame(columns=columnas_internas)
 
 # Inicializar datos en la sesión de forma limpia
 if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
-# Asegurar deduplicación en el estado global
 st.session_state.df_tareas = st.session_state.df_tareas.drop_duplicates(subset=["ID"])
 df_tareas = st.session_state.df_tareas
 
@@ -143,8 +116,9 @@ def guardar_datos():
     if API_URL:
         try:
             df_copia = df_tareas.copy()
-            df_copia["Fecha_Hora_Entrega"] = df_copia["Fecha_Hora_Entrega"].astype(str)
-            datos_enviar = df_copia[["ID", "Tarea", "Fecha_Hora_Entrega", "Prioridad", "Estado", "Repeticion"]].to_dict(orient="records")
+            # Mapeo exacto hacia la columna real de tu Google Sheets (Fecha de Entrega)
+            df_copia = df_copia.rename(columns={"Fecha_Hora_Entrega": "Fecha de Entrega"})
+            datos_enviar = df_copia[["ID", "Tarea", "Fecha de Entrega", "Prioridad", "Estado", "Repeticion"]].to_dict(orient="records")
             
             requests.post(API_URL, data=json.dumps(datos_enviar), headers={"Content-Type": "application/json"}, timeout=10)
             st.toast("💾 ¡Agenda sincronizada con Google Sheets!")
@@ -152,11 +126,11 @@ def guardar_datos():
             st.toast("⚠️ Guardado localmente en la sesión.")
 
 def calcular_siguiente_fecha_hora(dt_actual, tipo_repeticion):
-    if tipo_repeticion == "dia_semana":
+    if "semana" in tipo_repeticion.lower():
         return dt_actual + timedelta(weeks=1)
-    elif tipo_repeticion == "todos_dias":
+    elif "todos" in tipo_repeticion.lower():
         return dt_actual + timedelta(days=1)
-    elif tipo_repeticion == "mes_especifico":
+    elif "mes" in tipo_repeticion.lower():
         try:
             dias_mes = calendar.monthrange(dt_actual.year, dt_actual.month)[1]
             return dt_actual + timedelta(days=dias_mes)
@@ -170,8 +144,7 @@ def enviar_alerta_correo(tareas_urgentes):
     try:
         cuerpo = "Hola, tienes pendientes urgentes para revisar hoy en tu Agenda Inteligente:\n\n"
         for _, row in tareas_urgentes.iterrows():
-            prio_val = row.get('Prioridad', 'media')
-            prio_panta = MAPEO_PRIORIDAD_PANTALLA.get(prio_val, "Media (Importante)")
+            prio_panta = row.get('Prioridad', 'Media (Importante)')
             cuerpo += f"• Tarea: {row['Tarea']} | Plazo: {row['Fecha_Hora_Entrega']} | Prioridad: {prio_panta}\n"
         cuerpo += "\n¡Que tengas un excelente y productivo día!"
         
@@ -246,9 +219,9 @@ with st.form("form_tarea", clear_on_submit=True):
             "ID": nuevo_id,
             "Tarea": input_tarea,
             "Fecha_Hora_Entrega": dt_combinado.strftime("%Y-%m-%d %H:%M:%S"),
-            "Prioridad": MAPEO_PRIORIDAD_BASE[prioridad_seleccionada],
+            "Prioridad": prioridad_seleccionada,
             "Estado": "Pendiente",
-            "Repeticion": MAPEO_REP_BASE[repeticion_seleccionada]
+            "Repeticion": repeticion_seleccionada
         }])
         st.session_state.df_tareas = pd.concat([st.session_state.df_tareas, nueva_fila], ignore_index=True)
         st.session_state.df_tareas = st.session_state.df_tareas.drop_duplicates(subset=["ID"])
@@ -272,38 +245,29 @@ else:
     tareas_pendientes = pd.DataFrame()
 
 if not tareas_pendientes.empty:
-    # Separación matemática limpia por orden alfanumérico estándar (ISO)
     urgentes = tareas_pendientes[tareas_pendientes["Fecha_Hora_Entrega"] <= ahora_str_comparar]
     
-    # Caja roja de advertencia únicamente si existen tareas vencidas de verdad
     if not urgentes.empty:
         st.error(f"⚠️ ¡TIENES {len(urgentes)} TAREAS ACTIVAS O VENCIDAS!")
         for idx, row in urgentes.iterrows():
-            rep_llave = row.get('Repeticion', 'no')
-            rep_panta = MAPEO_REP_PANTALLA.get(rep_llave, "No repetir")
-            rep_text = f" ({rep_panta})" if rep_llave != "no" else ""
-            
-            prio_val = row.get('Prioridad', 'media')
-            prio_panta = MAPEO_PRIORIDAD_PANTALLA.get(prio_val, "Media (Importante)")
+            rep_text = f" ({row.get('Repeticion', 'No repetir')})" if row.get('Repeticion', 'No repetir') != "No repetir" else ""
+            prio_panta = row.get('Prioridad', 'Media (Importante)')
             st.write(f"• **{row['Tarea']}** (Plazo: {row['Fecha_Hora_Entrega']}){rep_text} - *[{prio_panta}]*")
         
         if "alerta_enviada" not in st.session_state:
             enviar_alerta_correo(urgentes)
             st.session_state["alerta_enviada"] = True
             
-    # --- CUADRÍCULA CENTRAL FIJA Y PERMANENTE ---
     st.info("📅 Cuadrícula General de Pendientes Activos:")
     cuadricula_df = tareas_pendientes.copy()
-    cuadricula_df["Prioridad_Vista"] = cuadricula_df["Prioridad"].map(MAPEO_PRIORIDAD_PANTALLA).fillna("Media (Importante)")
-    cuadricula_df["Repeticion_Vista"] = cuadricula_df["Repeticion"].map(MAPEO_REP_PANTALLA).fillna("No repetir")
     cuadricula_ordenada = cuadricula_df.sort_values(by="Fecha_Hora_Entrega")
     
     st.dataframe(
-        cuadricula_ordenada[["Tarea", "Fecha_Hora_Entrega", "Prioridad_Vista", "Repeticion_Vista"]].rename(
+        cuadricula_ordenada[["Tarea", "Fecha_Hora_Entrega", "Prioridad", "Repeticion"]].rename(
             columns={
                 "Fecha_Hora_Entrega": "Fecha y Hora de Entrega", 
-                "Prioridad_Vista": "Prioridad", 
-                "Repeticion_Vista": "Repetición"
+                "Prioridad": "Prioridad", 
+                "Repeticion": "Repetición"
             }
         ), 
         use_container_width=True, 
@@ -353,46 +317,42 @@ if not df_tareas.empty:
         with col3:
             if row["Estado"] == "Pendiente":
                 opciones_rep_panta = ["No repetir", "Un día específico (Cada semana)", "Todos los días (Semana específica)", "Todo un mes específico"]
-                rep_base = row.get("Repeticion", "no")
-                if rep_base not in MAPEO_REP_PANTALLA:
-                    rep_base = "no"
-                val_rep_panta = MAPEO_REP_PANTALLA[rep_base]
+                val_rep_panta = row.get("Repeticion", "No repetir")
+                if val_rep_panta not in opciones_rep_panta:
+                    val_rep_panta = "No repetir"
                 idx_rep_actual = opciones_rep_panta.index(val_rep_panta)
                 
                 nueva_rep_cambiada_panta = st.selectbox("Repetición", options=opciones_rep_panta, index=idx_rep_actual, key=key_rep, label_visibility="collapsed")
-                nueva_rep_base = MAPEO_REP_BASE[nueva_rep_cambiada_panta]
-                if nueva_rep_base != row["Repeticion"]:
-                    df_tareas.at[idx, "Repeticion"] = nueva_rep_base
+                if nueva_rep_cambiada_panta != row["Repeticion"]:
+                    df_tareas.at[idx, "Repeticion"] = nueva_rep_cambiada_panta
                     guardar_datos()
                     st.rerun()
             else:
-                st.caption(f"Repite: {MAPEO_REP_PANTALLA.get(row.get('Repeticion', 'no'), 'No repetir')}")
+                st.caption(f"Repite: {row.get('Repeticion', 'No repetir')}")
                 
         with col4:
             if row["Estado"] == "Pendiente":
                 opciones_prio_panta = ["Alta (Urgente)", "Media (Importante)", "Baja (Rutina)"]
-                prio_base = row.get("Prioridad", "media")
-                if prio_base not in MAPEO_PRIORIDAD_PANTALLA:
-                    prio_base = "media"
-                val_prio_panta = MAPEO_PRIORIDAD_PANTALLA[prio_base]
+                val_prio_panta = row.get("Prioridad", "Media (Importante)")
+                if val_prio_panta not in opciones_prio_panta:
+                    val_prio_panta = "Media (Importante)"
                 idx_prio_actual = opciones_prio_panta.index(val_prio_panta)
                 
                 nueva_prio_cambiada_panta = st.selectbox("Prioridad", options=opciones_prio_panta, index=idx_prio_actual, key=key_prio, label_visibility="collapsed")
-                nueva_prio_base = MAPEO_PRIORIDAD_BASE[nueva_prio_cambiada_panta]
-                if nueva_prio_base != row["Prioridad"]:
-                    df_tareas.at[idx, "Prioridad"] = nueva_prio_base
+                if nueva_prio_cambiada_panta != row["Prioridad"]:
+                    df_tareas.at[idx, "Prioridad"] = nueva_prio_cambiada_panta
                     guardar_datos()
                     st.rerun()
             else:
-                st.caption(f"Prio: {MAPEO_PRIORIDAD_PANTALLA.get(row.get('Prioridad', 'media'), 'Media (Importante)')}")
+                st.caption(f"Prio: {row.get('Prioridad', 'Media (Importante)')}")
                 
         with col5:
             sub_col1, sub_col2 = st.columns(2)
             with sub_col1:
                 if row["Estado"] == "Pendiente":
                     if st.button("✔", key=key_completar, help="Completar"):
-                        rep_tipo = row.get("Repeticion", "no")
-                        if rep_tipo != "no":
+                        rep_tipo = row.get("Repeticion", "No repetir")
+                        if rep_tipo != "No repetir":
                             try:
                                 current_dt = datetime.strptime(str(row["Fecha_Hora_Entrega"]), "%Y-%m-%d %H:%M:%S")
                             except:
