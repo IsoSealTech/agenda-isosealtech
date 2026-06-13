@@ -15,7 +15,6 @@ st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout=
 # Forzar la fecha real de Colombia (UTC -5) calculada desde la hora del servidor
 ahora_colombia = datetime.utcnow() - timedelta(hours=5)
 hoy_colombia = ahora_colombia.date()
-hora_actual_colombia = ahora_colombia.time()
 
 # CONFIGURACIÓN DEL CORREO DESDE LOS SECRETOS DE LA NUBE
 CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
@@ -29,7 +28,7 @@ try:
 except Exception:
     st.error("Por favor, configura la URL de la aplicación web en los Secrets.")
 
-# Diccionarios de mapeo para evitar errores de texto con paréntesis en la base de datos
+# Diccionarios de mapeo estables de doble vía
 MAPEO_PRIORIDAD_PANTALLA = {
     "alta": "Alta (Urgente)",
     "media": "Media (Importante)",
@@ -66,8 +65,7 @@ def cargar_datos():
                 if datos_json:
                     df = pd.DataFrame(datos_json)
                     
-                    # --- COMPATIBILIDAD CON DATOS ANTERIORES (SALVAVIDAS) ---
-                    # Si la columna viene con el nombre viejo ("Fecha de Entrega" o "Fecha_Entrega"), la renombramos sin perder la información
+                    # Compatibilidad y migración automática de columnas viejas
                     if "Fecha de Entrega" in df.columns:
                         df = df.rename(columns={"Fecha de Entrega": "Fecha_Hora_Entrega"})
                     elif "Fecha_Entrega" in df.columns:
@@ -80,7 +78,7 @@ def cargar_datos():
                     df["Estado"] = df["Estado"].fillna("Pendiente").astype(str).str.strip()
                     df["Estado"] = df["Estado"].apply(lambda x: "Pendiente" if x == "" else x)
                     
-                    # Tratamiento estricto de prioridades
+                    # Normalización robusta de prioridad
                     df["Prioridad"] = df["Prioridad"].fillna("media").astype(str).str.strip().str.lower()
                     df["Prioridad"] = df["Prioridad"].apply(
                         lambda x: "alta" if "alt" in x 
@@ -88,7 +86,7 @@ def cargar_datos():
                         else "media")
                     )
                     
-                    # Tratamiento estricto de repetición adaptado al nuevo esquema
+                    # Normalización robusta de repetición
                     df["Repeticion"] = df["Repeticion"].fillna("no").astype(str).str.strip().str.lower()
                     df["Repeticion"] = df["Repeticion"].apply(
                         lambda x: "dia_semana" if ("seman" in x or "dia_s" in x)
@@ -97,7 +95,7 @@ def cargar_datos():
                         else "no"))
                     )
                     
-                    # Adaptar fechas viejas que no tienen hora incorporada de forma segura
+                    # Adaptar fechas antiguas agregándoles hora por defecto
                     df["Fecha_Hora_Entrega"] = df["Fecha_Hora_Entrega"].astype(str).str.strip()
                     df["Fecha_Hora_Entrega"] = df["Fecha_Hora_Entrega"].apply(
                         lambda x: f"{x} 08:00:00" if (len(x) > 0 and " " not in x and ":" not in x) else (x if len(x) > 5 else f"{hoy_colombia} 08:00:00")
@@ -108,7 +106,7 @@ def cargar_datos():
             pass
     return pd.DataFrame(columns=columnas_limpias)
 
-# Inicializar datos en la sesión
+# Inicializar o refrescar datos en la sesión
 if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
@@ -245,7 +243,10 @@ else:
     tareas_pendientes = pd.DataFrame()
 
 if not tareas_pendientes.empty:
+    # Corrección segura del error de tipo: Parsear la columna a Datetime real antes de comparar
     tareas_pendientes["dt_obj"] = pd.to_datetime(tareas_pendientes["Fecha_Hora_Entrega"], errors='coerce')
+    tareas_pendientes["dt_obj"] = tareas_pendientes["dt_obj"].fillna(ahora_colombia)
+    
     urgentes = tareas_pendientes[tareas_pendientes["dt_obj"] <= ahora_colombia]
     proximas = tareas_pendientes[tareas_pendientes["dt_obj"] > ahora_colombia].copy()
     
