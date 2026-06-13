@@ -8,6 +8,7 @@ from speech_recognition import Recognizer, AudioFile
 import requests
 import json
 import os
+import calendar
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout="centered")
@@ -15,9 +16,7 @@ st.set_page_config(page_title="Mi Agenda Inteligente", page_icon="📅", layout=
 # Forzar la fecha real de Colombia (UTC -5) calculada desde la hora del servidor
 ahora_colombia = datetime.utcnow() - timedelta(hours=5)
 hoy_colombia = ahora_colombia.date()
-
-# Convertir la hora de comparación a un formato compatible de Pandas Timestamp para evitar el TypeError
-ahora_colombia_ts = pd.Timestamp(ahora_colombia)
+ahora_str_comparar = ahora_colombia.strftime("%Y-%m-%d %H:%M:%S")
 
 # CONFIGURACIÓN DEL CORREO DESDE LOS SECRETOS DE LA NUBE
 CORREO_EMISOR = st.secrets["CORREO_EMISOR"]
@@ -56,6 +55,39 @@ MAPEO_REP_BASE = {
     "Todo un mes específico": "mes_especifico"
 }
 
+# Funciones de normalización para evitar que los datos existentes se reinicien a valores por defecto
+def normalizar_prioridad(x):
+    val = str(x).strip().lower()
+    if "alt" in val:
+        return "alta"
+    elif "baj" in val:
+        return "baja"
+    return "media"
+
+def normalizar_repeticion(x):
+    val = str(x).strip().lower()
+    if "dia_s" in val or "seman" in val:
+        return "dia_semana"
+    elif "todos" in val or "todos_d" in val:
+        return "todos_dias"
+    elif "mes" in val:
+        return "mes_especifico"
+    return "no"
+
+def normalizar_fecha_hora(x):
+    val = str(x).strip().replace("/", "-")
+    if not val or val == "nan" or val == "None":
+        return f"{hoy_colombia} 08:00:00"
+    # Si viene en formato antiguo de solo fecha (AAAA-MM-DD), le agregamos la hora limpia
+    if " " not in val and ":" not in val:
+        if len(val) == 10:
+            return f"{val} 08:00:00"
+        return f"{hoy_colombia} 08:00:00"
+    # Asegurar formato correcto cortando microsegundos si existen
+    if len(val) > 19:
+        val = val[:19]
+    return val
+
 # Cargar datos desde Google Sheets a través del puente
 def cargar_datos():
     columnas_limpias = ["ID", "Tarea", "Fecha_Hora_Entrega", "Prioridad", "Estado", "Repeticion"]
@@ -68,7 +100,7 @@ def cargar_datos():
                 if datos_json:
                     df = pd.DataFrame(datos_json)
                     
-                    # Compatibilidad y migración automática de columnas viejas
+                    # Soporte de migración para columnas anteriores sin perder datos
                     if "Fecha de Entrega" in df.columns:
                         df = df.rename(columns={"Fecha de Entrega": "Fecha_Hora_Entrega"})
                     elif "Fecha_Entrega" in df.columns:
@@ -81,35 +113,17 @@ def cargar_datos():
                     df["Estado"] = df["Estado"].fillna("Pendiente").astype(str).str.strip()
                     df["Estado"] = df["Estado"].apply(lambda x: "Pendiente" if x == "" else x)
                     
-                    # Normalización robusta de prioridad
-                    df["Prioridad"] = df["Prioridad"].fillna("media").astype(str).str.strip().str.lower()
-                    df["Prioridad"] = df["Prioridad"].apply(
-                        lambda x: "alta" if "alt" in x 
-                        else ("baja" if "baj" in x 
-                        else "media")
-                    )
-                    
-                    # Normalización robusta de repetición
-                    df["Repeticion"] = df["Repeticion"].fillna("no").astype(str).str.strip().str.lower()
-                    df["Repeticion"] = df["Repeticion"].apply(
-                        lambda x: "dia_semana" if ("seman" in x or "dia_s" in x)
-                        else ("todos_dias" if ("todos" in x or "todos_d" in x)
-                        else ("mes_especifico" if ("mes" in x or "mes_e" in x)
-                        else "no"))
-                    )
-                    
-                    # Adaptar fechas antiguas agregándoles hora por defecto
-                    df["Fecha_Hora_Entrega"] = df["Fecha_Hora_Entrega"].astype(str).str.strip()
-                    df["Fecha_Hora_Entrega"] = df["Fecha_Hora_Entrega"].apply(
-                        lambda x: f"{x} 08:00:00" if (len(x) > 0 and " " not in x and ":" not in x) else (x if len(x) > 5 else f"{hoy_colombia} 08:00:00")
-                    )
+                    # Aplicar normalizadores robustos
+                    df["Prioridad"] = df["Prioridad"].apply(normalizar_prioridad)
+                    df["Repeticion"] = df["Repeticion"].apply(normalizar_repeticion)
+                    df["Fecha_Hora_Entrega"] = df["Fecha_Hora_Entrega"].apply(normalizar_fecha_hora)
                     
                     return df[columnas_limpias]
         except Exception:
             pass
     return pd.DataFrame(columns=columnas_limpias)
 
-# Inicializar o refrescar datos en la sesión (Solo carga de internet si la sesión está en blanco)
+# Inicializar o refrescar datos en la sesión
 if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
@@ -140,7 +154,11 @@ def calcular_siguiente_fecha_hora(dt_actual, tipo_repeticion):
     elif tipo_repeticion == "todos_dias":
         return dt_actual + timedelta(days=1)
     elif tipo_repeticion == "mes_especifico":
-        return dt_actual + timedelta(days=30)
+        try:
+            dias_mes = calendar.monthrange(dt_actual.year, dt_actual.month)[1]
+            return dt_actual + timedelta(days=dias_mes)
+        except:
+            return dt_actual + timedelta(days=30)
     return dt_actual
 
 def enviar_alerta_correo(tareas_urgentes):
@@ -175,8 +193,7 @@ with col_titulo:
     st.title("📅 Mi Agenda Inteligente")
     st.write("Guarda tus pendientes por texto o voz de la forma más sencilla.")
     
-    # Botón manual para actualizar datos en la tableta o celular
-    if st.button("🔄 Sincronizar / Traer Datos de Google", help="Haz clic aquí si agregaste tareas en otro dispositivo"):
+    if st.button("🔄 Sincronizar / Traer Datos de Google", help="Sincroniza tus dispositivos"):
         st.session_state.df_tareas = cargar_datos()
         st.rerun()
 
@@ -251,12 +268,9 @@ else:
     tareas_pendientes = pd.DataFrame()
 
 if not tareas_pendientes.empty:
-    # Solución definitiva al TypeError: Convertir de forma segura usando el Timestamp unificado de Pandas
-    tareas_pendientes["dt_obj"] = pd.to_datetime(tareas_pendientes["Fecha_Hora_Entrega"], errors='coerce')
-    tareas_pendientes["dt_obj"] = tareas_pendientes["dt_obj"].fillna(ahora_colombia_ts)
-    
-    urgentes = tareas_pendientes[tareas_pendientes["dt_obj"] <= ahora_colombia_ts]
-    proximas = tareas_pendientes[tareas_pendientes["dt_obj"] > ahora_colombia_ts].copy()
+    # Solución definitiva al TypeError de Python 3.14: Comparación directa por orden alfanumérico estricto de Strings (ISO)
+    urgentes = tareas_pendientes[tareas_pendientes["Fecha_Hora_Entrega"] <= ahora_str_comparar]
+    proximas = tareas_pendientes[tareas_pendientes["Fecha_Hora_Entrega"] > ahora_str_comparar].copy()
     
     if not urgentes.empty:
         st.error(f"⚠️ ¡TIENES {len(urgentes)} TAREAS ACTIVAS O VENCIDAS!")
@@ -277,7 +291,7 @@ if not tareas_pendientes.empty:
         st.info("📅 Siguientes tareas en el calendario:")
         proximas["Prioridad_Vista"] = proximas["Prioridad"].map(MAPEO_PRIORIDAD_PANTALLA).fillna("Media (Importante)")
         proximas["Repeticion_Vista"] = proximas["Repeticion"].map(MAPEO_REP_PANTALLA).fillna("No repetir")
-        proximas_ordenadas = proximas.sort_values(by="dt_obj")
+        proximas_ordenadas = proximas.sort_values(by="Fecha_Hora_Entrega")
         st.dataframe(proximas_ordenadas[["Tarea", "Fecha_Hora_Entrega", "Prioridad_Vista", "Repeticion_Vista"]].rename(columns={"Fecha_Hora_Entrega": "Fecha y Hora de Entrega", "Prioridad_Vista": "Prioridad", "Repeticion_Vista": "Repeticion"}), use_container_width=True, hide_index=True)
 else:
     st.success("🎉 ¡Estás al día!")
