@@ -55,7 +55,7 @@ MAPEO_REP_BASE = {
     "Todo un mes específico": "mes_especifico"
 }
 
-# Funciones de normalización para evitar que los datos existentes se reinicien a valores por defecto
+# Funciones de normalización seguras
 def normalizar_prioridad(x):
     val = str(x).strip().lower()
     if "alt" in val:
@@ -78,12 +78,10 @@ def normalizar_fecha_hora(x):
     val = str(x).strip().replace("/", "-")
     if not val or val == "nan" or val == "None":
         return f"{hoy_colombia} 08:00:00"
-    # Si viene en formato antiguo de solo fecha (AAAA-MM-DD), le agregamos la hora limpia
     if " " not in val and ":" not in val:
         if len(val) == 10:
             return f"{val} 08:00:00"
         return f"{hoy_colombia} 08:00:00"
-    # Asegurar formato correcto cortando microsegundos si existen
     if len(val) > 19:
         val = val[:19]
     return val
@@ -113,20 +111,23 @@ def cargar_datos():
                     df["Estado"] = df["Estado"].fillna("Pendiente").astype(str).str.strip()
                     df["Estado"] = df["Estado"].apply(lambda x: "Pendiente" if x == "" else x)
                     
-                    # Aplicar normalizadores robustos
                     df["Prioridad"] = df["Prioridad"].apply(normalizar_prioridad)
                     df["Repeticion"] = df["Repeticion"].apply(normalizar_repeticion)
                     df["Fecha_Hora_Entrega"] = df["Fecha_Hora_Entrega"].apply(normalizar_fecha_hora)
                     
+                    # --- FILTRO ANTIDUPLICADOS SALVAVIDAS ---
+                    df = df.drop_duplicates(subset=["ID"])
                     return df[columnas_limpias]
         except Exception:
             pass
     return pd.DataFrame(columns=columnas_limpias)
 
-# Inicializar o refrescar datos en la sesión
+# Inicializar datos en la sesión de forma limpia
 if "df_tareas" not in st.session_state:
     st.session_state.df_tareas = cargar_datos()
 
+# Asegurar deduplicación en el estado global
+st.session_state.df_tareas = st.session_state.df_tareas.drop_duplicates(subset=["ID"])
 df_tareas = st.session_state.df_tareas
 
 # Controladores de memoria para el Grabador de Voz
@@ -136,6 +137,8 @@ if "ultimo_audio_id" not in st.session_state:
     st.session_state.ultimo_audio_id = None
 
 def guardar_datos():
+    global df_tareas
+    df_tareas = df_tareas.drop_duplicates(subset=["ID"])
     st.session_state.df_tareas = df_tareas
     if API_URL:
         try:
@@ -248,6 +251,7 @@ with st.form("form_tarea", clear_on_submit=True):
             "Repeticion": MAPEO_REP_BASE[repeticion_seleccionada]
         }])
         st.session_state.df_tareas = pd.concat([st.session_state.df_tareas, nueva_fila], ignore_index=True)
+        st.session_state.df_tareas = st.session_state.df_tareas.drop_duplicates(subset=["ID"])
         df_tareas = st.session_state.df_tareas
         guardar_datos()
         
@@ -268,10 +272,10 @@ else:
     tareas_pendientes = pd.DataFrame()
 
 if not tareas_pendientes.empty:
-    # Solución definitiva al TypeError de Python 3.14: Comparación directa por orden alfanumérico estricto de Strings (ISO)
+    # Separación matemática limpia por orden alfanumérico estándar (ISO)
     urgentes = tareas_pendientes[tareas_pendientes["Fecha_Hora_Entrega"] <= ahora_str_comparar]
-    proximas = tareas_pendientes[tareas_pendientes["Fecha_Hora_Entrega"] > ahora_str_comparar].copy()
     
+    # Caja roja de advertencia únicamente si existen tareas vencidas de verdad
     if not urgentes.empty:
         st.error(f"⚠️ ¡TIENES {len(urgentes)} TAREAS ACTIVAS O VENCIDAS!")
         for idx, row in urgentes.iterrows():
@@ -287,14 +291,26 @@ if not tareas_pendientes.empty:
             enviar_alerta_correo(urgentes)
             st.session_state["alerta_enviada"] = True
             
-    if not proximas.empty:
-        st.info("📅 Siguientes tareas en el calendario:")
-        proximas["Prioridad_Vista"] = proximas["Prioridad"].map(MAPEO_PRIORIDAD_PANTALLA).fillna("Media (Importante)")
-        proximas["Repeticion_Vista"] = proximas["Repeticion"].map(MAPEO_REP_PANTALLA).fillna("No repetir")
-        proximas_ordenadas = proximas.sort_values(by="Fecha_Hora_Entrega")
-        st.dataframe(proximas_ordenadas[["Tarea", "Fecha_Hora_Entrega", "Prioridad_Vista", "Repeticion_Vista"]].rename(columns={"Fecha_Hora_Entrega": "Fecha y Hora de Entrega", "Prioridad_Vista": "Prioridad", "Repeticion_Vista": "Repeticion"}), use_container_width=True, hide_index=True)
+    # --- CUADRÍCULA CENTRAL FIJA Y PERMANENTE ---
+    st.info("📅 Cuadrícula General de Pendientes Activos:")
+    cuadricula_df = tareas_pendientes.copy()
+    cuadricula_df["Prioridad_Vista"] = cuadricula_df["Prioridad"].map(MAPEO_PRIORIDAD_PANTALLA).fillna("Media (Importante)")
+    cuadricula_df["Repeticion_Vista"] = cuadricula_df["Repeticion"].map(MAPEO_REP_PANTALLA).fillna("No repetir")
+    cuadricula_ordenada = cuadricula_df.sort_values(by="Fecha_Hora_Entrega")
+    
+    st.dataframe(
+        cuadricula_ordenada[["Tarea", "Fecha_Hora_Entrega", "Prioridad_Vista", "Repeticion_Vista"]].rename(
+            columns={
+                "Fecha_Hora_Entrega": "Fecha y Hora de Entrega", 
+                "Prioridad_Vista": "Prioridad", 
+                "Repeticion_Vista": "Repetición"
+            }
+        ), 
+        use_container_width=True, 
+        hide_index=True
+    )
 else:
-    st.success("🎉 ¡Estás al día!")
+    st.success("🎉 ¡Estás al día! No tienes tareas pendientes.")
 
 # 3. Lista General y Gestión de Tareas
 st.subheader("🗃️ Todas mis Tareas")
